@@ -476,7 +476,7 @@ let tq-pip-layout =
 
 global tq-pipeline =
     make-pipeline tq-pip-layout
-        \ vshader fshader-textured-quad wgpu.TextureFormat.Bgra8UnormSrgb BlendMode.Replace
+        \ vshader fshader-textured-quad wgpu.TextureFormat.Bgra8UnormSrgb BlendMode.Alpha
 
 # RESOURCES / BIND GROUPS
 # ================================================================================
