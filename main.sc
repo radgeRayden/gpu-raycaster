@@ -97,7 +97,6 @@ inline tile@ (level width height p)
     else
         deref (level @ ((y * width) + x))
 
-
 # CONSTANTS
 # ================================================================================
 let sky-color = (vec4 (vec3 (gamma->linear 0 0.498039 1)) 1)
@@ -121,7 +120,6 @@ let level-data =
 run-stage;
 
 # ================================================================================
-
 
 HID.init
     HID.WindowOptions
@@ -152,6 +150,7 @@ struct VertexAttributes plain
 struct RCData plain
     position : vec2
     orientation : f32
+
 define-scope shaders
     using import glsl
     using math
@@ -203,7 +202,6 @@ define-scope shaders
         let column-height = (1 / wall-distance.r)
         let top = (0.5 + (column-height / 2))
         let bottom = (0.5 - (column-height / 2))
-
 
         let wall-color = (vec4 (vec3 column-height) 1)
         let rowh = (1 / fb-height)
@@ -277,7 +275,6 @@ define-scope shaders
                     vec2
                         i.x + (0.0001 * (cos angle))
                         i.y + (0.0001 * (sin angle))
-
 
                 let distv = (distance iv cur-hit)
                 let disth = (distance ih cur-hit)
@@ -467,7 +464,6 @@ local tq-bgroup-layouts =
                                 ty = wgpu.BindingType.Sampler
                 entries_length = 2
 
-
 let tq-pip-layout =
     wgpu.device_create_pipeline_layout device
         &local wgpu.PipelineLayoutDescriptor
@@ -589,7 +585,6 @@ global minimap-tex-bgroup =
                         gfx.descriptors.bindings.TextureView 0 minimap-texview
                         gfx.descriptors.bindings.Sampler 1 tex-sampler
             entries_length = 2
-
 
 local qvertices =
     arrayof vec2
