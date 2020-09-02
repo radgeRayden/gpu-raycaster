@@ -291,12 +291,13 @@ define-scope shaders
         let aoffset = (gl_FragCoord.x * (FOV / fb-width))
 
         #  /
-        # / +
+        # / -
         # -----
-        # \ -
+        # \ +
         #  \
+        # because y is down, this also changes angles to increase CW
         let rangle =
-            orientation + (FOV / 2) - aoffset
+            orientation - (FOV / 2) + aoffset
 
         let hitlen = (raycast position rangle)
         # correct distortion caused by angled rays being longer
@@ -316,9 +317,7 @@ define-scope shaders
         local level-data = level-data
         angle := rcdata.orientation
         position := rcdata.position
-        # the minimap area is 4x4 units
-        # tbh I don't get why I have to invert the x axis here
-        vtexcoord := vtexcoord * (vec2 -1 1) + (vec2 1 0)
+        # the minimap area is 6x6 units
         let tile-samplep =
             + position
                 2drotate
@@ -701,17 +700,17 @@ while (not (HID.window.received-quit-event?))
         speed := 2
         dir   := (vec2 (cos angle) (sin angle))
         if (down? KeyCode.A)
-            position += ((2drotate dir (pi / 2)) * speed * dt)
-        if (down? KeyCode.D)
             position += ((2drotate dir (-pi / 2)) * speed * dt)
+        if (down? KeyCode.D)
+            position += ((2drotate dir (pi / 2)) * speed * dt)
         if (down? KeyCode.S)
             position += (-dir * speed * dt)
         if (down? KeyCode.W)
             position += (dir * speed * dt)
         if (down? KeyCode.LEFT)
-            angle += ((pi / 2) * dt)
-        if (down? KeyCode.RIGHT)
             angle -= ((pi / 2) * dt)
+        if (down? KeyCode.RIGHT)
+            angle += ((pi / 2) * dt)
 
     wgpu.queue_write_buffer gfxstate.istate.queue
         rc-data-buffer
