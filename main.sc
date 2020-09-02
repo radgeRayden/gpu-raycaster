@@ -15,46 +15,10 @@ import .gfxstate
 import .wgpu
 import .gfx.descriptors
 
-inline gamma->linear (...)
-    va-map
-        inline (c)
-            if (c <= 0.04045)
-                c / 12.92
-            else
-                ((c + 0.055) / 1.055) ** 2.4
-        ...
-
-let sky-color = (vec4 (vec3 (gamma->linear 0 0.498039 1)) 1)
-let ground-color = (vec4 (vec3 (gamma->linear 0.498039 0.498039 0.498039)) 1)
-run-stage;
-
-# ================================================================================
-
-let fb-width = 1024:u32
-let fb-height = 768:u32
-
-HID.init
-    HID.WindowOptions
-        # resizable? = false
-        width = fb-width
-        height = fb-height
-    HID.GfxAPI.WebGPU;
-
-HID.on-key-event =
-    fn "key-callback" (ev)
-        using HID.keyboard
-        if (keybind ev KeyModifier.ALT KeyCode.ENTER)
-            HID.window.toggle-fullscreen;
-
-        if (keybind ev KeyCode.ESCAPE)
-            HID.window.close;
-
-gfxstate.init;
-let device = ('force-unwrap gfxstate.istate.device)
-
 # UTILITY FUNCTIONS
 # ================================================================================
 inline make-shader (fun stage)
+    let device = ('force-unwrap gfxstate.istate.device)
     let code = (compile-spirv 0x10000 stage (static-typify fun))
     let clen = ((countof code) // 4)
 
@@ -70,6 +34,7 @@ enum BlendMode plain
     Replace
 
 inline make-pipeline (layout vshader fshader output-format blend-mode)
+    let device = ('force-unwrap gfxstate.istate.device)
     let alpha-blend =
         switch blend-mode
         case BlendMode.Alpha
@@ -111,39 +76,114 @@ inline make-pipeline (layout vshader fshader output-format blend-mode)
             sample_count = 1
             sample_mask = 0xffffffff
 
+inline gamma->linear (...)
+    va-map
+        inline (c)
+            if (c <= 0.04045)
+                c / 12.92
+            else
+                ((c + 0.055) / 1.055) ** 2.4
+        ...
+
+inline tile@ (level width height p)
+    let p = (floor p)
+    let x y = (p.x as i32) (p.y as i32)
+    if (or
+        (x >= width)
+        (x < 0)
+        (y >= height)
+        (y < 0))
+        0:u32
+    else
+        deref (level @ ((y * width) + x))
+
+
+# CONSTANTS
+# ================================================================================
+let sky-color = (vec4 (vec3 (gamma->linear 0 0.498039 1)) 1)
+let ground-color = (vec4 (vec3 (gamma->linear 0.498039 0.498039 0.498039)) 1)
+let fb-width = 1024:u32
+let fb-height = 768:u32
+let level-width = 9
+let level-height = 9
+let level-data =
+    arrayof u32
+        \ 0 0 0 0 1 0 0 0 0
+        \ 0 1 1 1 1 1 1 0 1
+        \ 0 1 0 0 0 0 0 0 1
+        \ 0 1 0 1 0 0 0 0 1
+        \ 1 1 0 1 0 0 0 0 1
+        \ 0 1 0 1 0 0 1 0 1
+        \ 0 1 0 1 0 0 0 0 1
+        \ 0 1 0 0 0 0 0 0 1
+        \ 0 1 1 1 1 1 1 1 1
+
+run-stage;
+
+# ================================================================================
+
+
+HID.init
+    HID.WindowOptions
+        # resizable? = false
+        width = fb-width
+        height = fb-height
+    HID.GfxAPI.WebGPU;
+
+HID.on-key-event =
+    fn "key-callback" (ev)
+        using HID.keyboard
+        if (keybind ev KeyModifier.ALT KeyCode.ENTER)
+            HID.window.toggle-fullscreen;
+
+        if (keybind ev KeyCode.ESCAPE)
+            HID.window.close;
+
+gfxstate.init;
+let device = ('force-unwrap gfxstate.istate.device)
+
 # SHADERS
 # ================================================================================
+struct VertexAttributes plain
+    position : vec2
+    texcoord : vec2
+    color    : vec4
+
 struct RCData plain
     position : vec2
     orientation : f32
-
 define-scope shaders
     using import glsl
     using math
     fn vertex ()
+        buffer attributes : (tuple (array VertexAttributes))
+            set = 0
+            binding = 0
         out vtexcoord : vec2
             location = 0
+        out vcolor : vec4
+            location = 1
 
-        local vertices =
-            arrayof vec2
-                vec2 -1  1 # top left
-                vec2 -1 -1 # bottom left
-                vec2  1 -1 # bottom right
-                vec2  1 -1 # bottom right
-                vec2  1  1 # top right
-                vec2 -1  1 # top left
+        attr := (extractvalue attributes 0) @ gl_VertexIndex
 
-        local texcoords =
-            arrayof vec2
-                vec2 0 1 # top left
-                vec2 0 0 # bottom left
-                vec2 1 0 # bottom right
-                vec2 1 0 # bottom right
-                vec2 1 1 # top right
-                vec2 0 1 # top left
+        gl_Position = (vec4 attr.position 0 1)
+        vcolor = attr.color
+        vtexcoord = attr.texcoord
 
-        gl_Position = (vec4 (vertices @ gl_VertexIndex) 0 1)
-        vtexcoord = (texcoords @ gl_VertexIndex)
+    fn textured-quad-fragment ()
+        in vtexcoord : vec2
+            location = 0
+        out fcolor : vec4
+            location = 0
+
+        uniform diffuse-t : texture2D
+            set = 1
+            binding = 0
+        uniform diffuse-s : sampler
+            set = 1
+            binding = 1
+
+        fcolor = (texture (sampler2D diffuse-t diffuse-s) vtexcoord)
 
     fn fb-fragment ()
         in vtexcoord : vec2
@@ -152,10 +192,10 @@ define-scope shaders
             location = 0
 
         uniform distance-map : texture1D
-            set = 0
+            set = 1
             binding = 0
         uniform tex-sampler : sampler
-            set = 0
+            set = 1
             binding = 1
 
         let wall-distance =
@@ -179,44 +219,21 @@ define-scope shaders
 
     fn rays-fragment ()
         uniform rcdata : RCData
-            set = 0
+            set = 1
             binding = 0
         in vtexcoord : vec2
             location = 0
         out fdistance : f32
             location = 0
 
+        local level-data = level-data
         # Each level quadrant has a unit of 1 meter.
-        let LEVEL_WIDTH = 8
-        let LEVEL_HEIGHT = 8
-        local level-data =
-            arrayof u32
-                \ 1 1 1 1 1 1 1 1
-                \ 1 0 0 0 0 0 0 1
-                \ 1 0 1 0 0 0 0 1
-                \ 1 0 1 0 0 0 0 1
-                \ 1 0 1 0 0 0 0 1
-                \ 1 0 0 0 0 0 1 1
-                \ 1 0 0 1 0 0 0 1
-                \ 1 1 1 1 1 1 1 1
-
-        inline tile@ (p)
-            let x y = (p.x as i32) (p.y as i32)
-            if (or
-                (x >= LEVEL_WIDTH)
-                (x < 0)
-                (y >= LEVEL_HEIGHT)
-                (y < 0))
-                0:u32
-            else
-                deref (level-data @ ((y * LEVEL_WIDTH) + x))
-
         let MAX_ITERATIONS = 100
         inline raycast (origin angle)
             loop (cur-hit iter = (deref origin) 0)
                 if (iter >= MAX_ITERATIONS)
                     break Inf
-                if ((tile@ cur-hit) > 0)
+                if ((tile@ level-data level-width level-height cur-hit) > 0)
                     break (distance cur-hit origin)
 
                 let ss = (sign (sin angle))
@@ -287,26 +304,95 @@ define-scope shaders
         let hitlen = (raycast position rangle)
         # correct distortion caused by angled rays being longer
         fdistance = (max 0.0001 (hitlen * (cos (rangle - orientation))))
+
+    fn minimap-fragment ()
+        uniform rcdata : RCData
+            set = 1
+            binding = 0
+        in vtexcoord : vec2
+            location = 0
+        out fcolor : vec4
+            location = 0
+
+        using math
+
+        local level-data = level-data
+        angle := rcdata.orientation
+        position := rcdata.position
+        # the minimap area is 4x4 units
+        # tbh I don't get why I have to invert the x axis here
+        vtexcoord := vtexcoord * (vec2 -1 1) + (vec2 1 0)
+        let tile-samplep =
+            + position
+                2drotate
+                    ((vtexcoord - (vec2 0.5 0.5)) * 6)
+                    (angle + (pi / 2))
+
+        let t = (tile@ level-data level-width level-height tile-samplep)
+        if ((distance vtexcoord (vec2 0.5)) < 0.025)
+            fcolor = (vec4 1 0 0 1)
+        else
+            fcolor = (mix ground-color (vec4 1) t)
       
-global vshader      = (make-shader shaders.vertex 'vertex)
-global fshader-fb   = (make-shader shaders.fb-fragment 'fragment)
-global fshader-rays = (make-shader shaders.rays-fragment 'fragment)
+global vshader               = (make-shader shaders.vertex 'vertex)
+global fshader-fb            = (make-shader shaders.fb-fragment 'fragment)
+global fshader-rays          = (make-shader shaders.rays-fragment 'fragment)
+global fshader-minimap       = (make-shader shaders.minimap-fragment 'fragment)
+global fshader-textured-quad = (make-shader shaders.textured-quad-fragment 'fragment)
+
+# REUSABLE BIND GROUP LAYOUTS
+# ================================================================================
+let vertex-attr-bgroup-layout =
+    wgpu.device_create_bind_group_layout device
+        &local wgpu.BindGroupLayoutDescriptor
+            label = "vertex attributes"
+            entries =
+                &local wgpu.BindGroupLayoutEntry
+                    binding = 0
+                    visibility = wgpu.WGPUShaderStage_VERTEX
+                    ty = wgpu.BindingType.StorageBuffer
+            entries_length = 1
+
+let distance-texture-bgroup-layout =
+    wgpu.device_create_bind_group_layout device
+        &local wgpu.BindGroupLayoutDescriptor
+            label = "diffuse texture"
+            entries =
+                &local
+                    arrayof wgpu.BindGroupLayoutEntry
+                        typeinit
+                            binding = 0
+                            visibility = wgpu.WGPUShaderStage_FRAGMENT
+                            ty = wgpu.BindingType.SampledTexture
+                            view_dimension = wgpu.TextureViewDimension.D1
+                            texture_component_type =
+                                wgpu.TextureComponentType.Float
+                        typeinit
+                            binding = 1
+                            visibility = wgpu.WGPUShaderStage_FRAGMENT
+                            ty = wgpu.BindingType.Sampler
+            entries_length = 2
+
+let rcdata-bgroup-layout =
+    wgpu.device_create_bind_group_layout device
+        &local wgpu.BindGroupLayoutDescriptor
+            label = "rcdata"
+            entries =
+                &local
+                    arrayof wgpu.BindGroupLayoutEntry
+                        typeinit
+                            binding = 0
+                            visibility = wgpu.WGPUShaderStage_FRAGMENT
+                            ty = wgpu.BindingType.UniformBuffer
+            entries_length = 1
 
 # RAYCASTING PIPELINE
 # ================================================================================
+
 local rays-bgroup-layouts =
     arrayof wgpu.BindGroupLayoutId
-        wgpu.device_create_bind_group_layout device
-            &local wgpu.BindGroupLayoutDescriptor
-                label = "diffuse texture"
-                entries =
-                    &local
-                        arrayof wgpu.BindGroupLayoutEntry
-                            typeinit
-                                binding = 0
-                                visibility = wgpu.WGPUShaderStage_FRAGMENT
-                                ty = wgpu.BindingType.UniformBuffer
-                entries_length = 1
+        vertex-attr-bgroup-layout
+        rcdata-bgroup-layout
 
 let rays-pip-layout =
     wgpu.device_create_pipeline_layout device
@@ -318,28 +404,29 @@ global rays-pipeline =
     make-pipeline rays-pip-layout
         \ vshader fshader-rays wgpu.TextureFormat.R32Float BlendMode.Replace
 
+# MINIMAP PIPELINE
+# ================================================================================
+local minimap-bgroup-layouts =
+    arrayof wgpu.BindGroupLayoutId
+        vertex-attr-bgroup-layout
+        rcdata-bgroup-layout
+
+let minimap-pip-layout =
+    wgpu.device_create_pipeline_layout device
+        &local wgpu.PipelineLayoutDescriptor
+            bind_group_layouts = ((& (view minimap-bgroup-layouts)) as (pointer u64))
+            bind_group_layouts_length = (countof minimap-bgroup-layouts)
+
+global minimap-pipeline =
+    make-pipeline minimap-pip-layout
+        \ vshader fshader-minimap wgpu.TextureFormat.Rgba8UnormSrgb BlendMode.Replace
+
 # SCENE RENDERING PIPELINE
 # ================================================================================
 local fb-bgroup-layouts =
     arrayof wgpu.BindGroupLayoutId
-        wgpu.device_create_bind_group_layout device
-            &local wgpu.BindGroupLayoutDescriptor
-                label = "diffuse texture"
-                entries =
-                    &local
-                        arrayof wgpu.BindGroupLayoutEntry
-                            typeinit
-                                binding = 0
-                                visibility = wgpu.WGPUShaderStage_FRAGMENT
-                                ty = wgpu.BindingType.SampledTexture
-                                view_dimension = wgpu.TextureViewDimension.D1
-                                texture_component_type =
-                                    wgpu.TextureComponentType.Uint
-                            typeinit
-                                binding = 1
-                                visibility = wgpu.WGPUShaderStage_FRAGMENT
-                                ty = wgpu.BindingType.Sampler
-                entries_length = 2
+        vertex-attr-bgroup-layout
+        distance-texture-bgroup-layout
 
 let fb-pip-layout =
     wgpu.device_create_pipeline_layout device
@@ -350,6 +437,41 @@ let fb-pip-layout =
 global fb-pipeline =
     make-pipeline fb-pip-layout
         \ vshader fshader-fb wgpu.TextureFormat.Bgra8UnormSrgb BlendMode.Replace
+
+# TEXTURED QUAD PIPELINE
+# ================================================================================
+local tq-bgroup-layouts =
+    arrayof wgpu.BindGroupLayoutId
+        vertex-attr-bgroup-layout
+        wgpu.device_create_bind_group_layout device
+            &local wgpu.BindGroupLayoutDescriptor
+                label = "diffuse texture"
+                entries =
+                    &local
+                        arrayof wgpu.BindGroupLayoutEntry
+                            typeinit
+                                binding = 0
+                                visibility = wgpu.WGPUShaderStage_FRAGMENT
+                                ty = wgpu.BindingType.SampledTexture
+                                view_dimension = wgpu.TextureViewDimension.D2
+                                texture_component_type =
+                                    wgpu.TextureComponentType.Uint
+                            typeinit
+                                binding = 1
+                                visibility = wgpu.WGPUShaderStage_FRAGMENT
+                                ty = wgpu.BindingType.Sampler
+                entries_length = 2
+
+
+let tq-pip-layout =
+    wgpu.device_create_pipeline_layout device
+        &local wgpu.PipelineLayoutDescriptor
+            bind_group_layouts = ((& (view tq-bgroup-layouts)) as (pointer u64))
+            bind_group_layouts_length = (countof tq-bgroup-layouts)
+
+global tq-pipeline =
+    make-pipeline tq-pip-layout
+        \ vshader fshader-textured-quad wgpu.TextureFormat.Bgra8UnormSrgb BlendMode.Replace
 
 # RESOURCES / BIND GROUPS
 # ================================================================================
@@ -398,7 +520,7 @@ global distance-tex-bgroup =
     wgpu.device_create_bind_group device
         &local wgpu.BindGroupDescriptor
             label = "distance texture bind group"
-            layout = (fb-bgroup-layouts @ 0)
+            layout = (fb-bgroup-layouts @ 1)
             entries =
                 &local
                     arrayof wgpu.BindGroupEntry
@@ -417,11 +539,138 @@ global rc-data-bgroup =
     wgpu.device_create_bind_group device
         &local wgpu.BindGroupDescriptor
             label = "raycaster input data"
-            layout = (rays-bgroup-layouts @ 0)
+            layout = (rays-bgroup-layouts @ 1)
             entries =
                 &local
                     arrayof wgpu.BindGroupEntry
                         gfx.descriptors.bindings.Buffer 0 rc-data-buffer 0 (sizeof RCData)
+            entries_length = 1
+
+global minimap-tex =
+    wgpu.device_create_texture device
+        &local wgpu.TextureDescriptor
+            label = "minimap texture"
+            size =
+                wgpu.Extent3d
+                    width = ((fb-width / 5) as u32)
+                    height = ((fb-width / 5) as u32)
+                    depth = 1
+            mip_level_count = 1
+            sample_count = 1
+            dimension = wgpu.TextureDimension.D2
+            format = wgpu.TextureFormat.Rgba8UnormSrgb
+            usage =
+                wgpu.TextureUsage_OUTPUT_ATTACHMENT | wgpu.TextureUsage_SAMPLED
+
+global minimap-texview =
+    wgpu.texture_create_view minimap-tex
+        &local wgpu.TextureViewDescriptor
+            label = "minimap texview"
+            format = wgpu.TextureFormat.Rgba8UnormSrgb
+            dimension = wgpu.TextureViewDimension.D2
+            aspect = wgpu.TextureAspect.All
+            base_mip_level = 0
+            level_count = 1
+            base_array_layer = 0
+            array_layer_count = 1
+
+global minimap-tex-bgroup =
+    wgpu.device_create_bind_group device
+        &local wgpu.BindGroupDescriptor
+            label = "minimap texture bind group"
+            layout = (tq-bgroup-layouts @ 1)
+            entries =
+                &local
+                    arrayof wgpu.BindGroupEntry
+                        gfx.descriptors.bindings.TextureView 0 minimap-texview
+                        gfx.descriptors.bindings.Sampler 1 tex-sampler
+            entries_length = 2
+
+
+local qvertices =
+    arrayof vec2
+        # normal quad
+        vec2 -1  1 # top left
+        vec2 -1 -1 # bottom left
+        vec2  1 -1 # bottom right
+        vec2  1  1 # top right
+
+local qtexcoords =
+    arrayof vec2
+        vec2 0 1 # top left
+        vec2 0 0 # bottom left
+        vec2 1 0 # bottom right
+        vec2 1 1 # top right
+
+local vertices = ((Array VertexAttributes))
+local indices = ((Array u16))
+# append fullscreen quad vertices
+for i in (range 4)
+    'append vertices
+        VertexAttributes
+            position = (qvertices @ i)
+            texcoord = (qtexcoords @ i)
+            color = (vec4 1)
+# append minimap vertices
+for i in (range 4)
+    let pos =
+        (qvertices @ i)
+    pos := pos + (vec2 1 -1)
+    pos := pos * (vec2 (fb-height / fb-width) 1) * 0.2 - (vec2 0.98 -0.98)
+    'append vertices
+        VertexAttributes
+            position = pos
+                # ((((qvertices @ i) - (vec2 1 -1)) / 5) - (vec2 0.5 -0.5)) * (vec2 (fb-width / fb-height) 1)
+            texcoord = (qtexcoords @ i)
+            color = (vec4 1)
+
+local qindices = (arrayof u16 0 1 2 2 3 0)
+# append fullscreen quad indices
+for i in qindices
+    'append indices i
+# append minimap indices
+for i in qindices
+    'append indices (i + 4)
+
+let attribute-array-size = ((countof vertices) * (sizeof VertexAttributes))
+print attribute-array-size
+# not to be confused with a vertex buffer :p
+global vertices-buffer =
+    wgpu.device_create_buffer device
+        &local wgpu.BufferDescriptor
+            label = "vertices"
+            size = attribute-array-size
+            usage = (wgpu.BufferUsage_COPY_DST | wgpu.BufferUsage_STORAGE)
+
+wgpu.queue_write_buffer gfxstate.istate.queue
+    vertices-buffer
+    0
+    ((imply vertices pointer) as (pointer u8))
+    attribute-array-size
+
+let ibuffer-size = ((countof indices) * (sizeof u16))
+global ibuffer =
+    wgpu.device_create_buffer device
+        &local wgpu.BufferDescriptor
+            label = "indices"
+            size = ibuffer-size
+            usage = (wgpu.BufferUsage_COPY_DST | wgpu.BufferUsage_INDEX)
+
+wgpu.queue_write_buffer gfxstate.istate.queue
+    ibuffer
+    0
+    ((imply indices pointer) as (pointer u8))
+    ibuffer-size
+
+global vertices-bgroup =
+    wgpu.device_create_bind_group device
+        &local wgpu.BindGroupDescriptor
+            label = "vertex attributes bindgroup"
+            layout = vertex-attr-bgroup-layout
+            entries =
+                &local
+                    arrayof wgpu.BindGroupEntry
+                        gfx.descriptors.bindings.Buffer 0 vertices-buffer 0 attribute-array-size
             entries_length = 1
 
 # GAME LOGIC / RENDERING
@@ -430,7 +679,7 @@ global game-timer = (timer.Timer)
 global time-acc = 0:f64
 global frame-counter : u64
 global ray-input-data : RCData
-    position = (vec2 3.5 3.5)
+    position = (vec2 4.5 4.5)
 
 while (not (HID.window.received-quit-event?))
     'step game-timer
@@ -492,9 +741,29 @@ while (not (HID.window.received-quit-event?))
                 color_attachments_length = 1
 
     wgpu.render_pass_set_pipeline rays-render-pass rays-pipeline
-    wgpu.render_pass_set_bind_group rays-render-pass 0 rc-data-bgroup null 0
-    wgpu.render_pass_draw rays-render-pass 6 1 0 0
+    wgpu.render_pass_set_bind_group rays-render-pass 0 vertices-bgroup null 0
+    wgpu.render_pass_set_bind_group rays-render-pass 1 rc-data-bgroup null 0
+    wgpu.render_pass_set_index_buffer rays-render-pass ibuffer 0 ibuffer-size
+    wgpu.render_pass_draw_indexed rays-render-pass 6 1 0 0 0
     wgpu.render_pass_end_pass rays-render-pass
+
+    let minimap-render-pass =
+        wgpu.command_encoder_begin_render_pass cmd-encoder
+            &local wgpu.RenderPassDescriptor
+                color_attachments =
+                    &local wgpu.RenderPassColorAttachmentDescriptor
+                        attachment = minimap-texview
+                        load_op = wgpu.LoadOp.Clear
+                        store_op = wgpu.StoreOp.Store
+                        clear_color = (wgpu.Color (unpack ground-color))
+                color_attachments_length = 1
+
+    wgpu.render_pass_set_pipeline minimap-render-pass minimap-pipeline
+    wgpu.render_pass_set_bind_group minimap-render-pass 0 vertices-bgroup null 0
+    wgpu.render_pass_set_bind_group minimap-render-pass 1 rc-data-bgroup null 0
+    wgpu.render_pass_set_index_buffer minimap-render-pass ibuffer 0 ibuffer-size
+    wgpu.render_pass_draw_indexed minimap-render-pass 6 1 0 0 0
+    wgpu.render_pass_end_pass minimap-render-pass
 
     let fb-render-pass =
         wgpu.command_encoder_begin_render_pass cmd-encoder
@@ -508,8 +777,18 @@ while (not (HID.window.received-quit-event?))
                 color_attachments_length = 1
 
     wgpu.render_pass_set_pipeline fb-render-pass fb-pipeline
-    wgpu.render_pass_set_bind_group fb-render-pass 0 distance-tex-bgroup null 0
-    wgpu.render_pass_draw fb-render-pass 6 1 0 0
+    wgpu.render_pass_set_bind_group fb-render-pass 0 vertices-bgroup null 0
+    wgpu.render_pass_set_bind_group fb-render-pass 1 distance-tex-bgroup null 0
+    wgpu.render_pass_set_index_buffer fb-render-pass ibuffer 0 ibuffer-size
+    wgpu.render_pass_draw_indexed fb-render-pass 6 1 0 0 0
+
+    # draw minimap
+    wgpu.render_pass_set_pipeline fb-render-pass tq-pipeline
+    wgpu.render_pass_set_bind_group fb-render-pass 0 vertices-bgroup null 0
+    wgpu.render_pass_set_bind_group fb-render-pass 1 minimap-tex-bgroup null 0
+    wgpu.render_pass_set_index_buffer fb-render-pass ibuffer 0 ibuffer-size
+    wgpu.render_pass_draw_indexed fb-render-pass 6 1 6 0 0
+
     wgpu.render_pass_end_pass fb-render-pass
 
     local cmdbuf = (wgpu.command_encoder_finish cmd-encoder null)
