@@ -13,7 +13,7 @@ import timer
 
 import .gfxstate
 import .wgpu
-import .gfx.descriptors
+import .descriptors
 
 # UTILITY FUNCTIONS
 # ================================================================================
@@ -523,8 +523,8 @@ global distance-tex-bgroup =
             entries =
                 &local
                     arrayof wgpu.BindGroupEntry
-                        gfx.descriptors.bindings.TextureView 0 distance-texture-view
-                        gfx.descriptors.bindings.Sampler 1 tex-sampler
+                        descriptors.bindings.TextureView 0 distance-texture-view
+                        descriptors.bindings.Sampler 1 tex-sampler
             entries_length = 2
 
 let rc-data-buffer =
@@ -542,7 +542,7 @@ global rc-data-bgroup =
             entries =
                 &local
                     arrayof wgpu.BindGroupEntry
-                        gfx.descriptors.bindings.Buffer 0 rc-data-buffer 0 (sizeof RCData)
+                        descriptors.bindings.Buffer 0 rc-data-buffer 0 (sizeof RCData)
             entries_length = 1
 
 global minimap-tex =
@@ -581,8 +581,8 @@ global minimap-tex-bgroup =
             entries =
                 &local
                     arrayof wgpu.BindGroupEntry
-                        gfx.descriptors.bindings.TextureView 0 minimap-texview
-                        gfx.descriptors.bindings.Sampler 1 tex-sampler
+                        descriptors.bindings.TextureView 0 minimap-texview
+                        descriptors.bindings.Sampler 1 tex-sampler
             entries_length = 2
 
 local qvertices =
@@ -667,7 +667,7 @@ global vertices-bgroup =
             entries =
                 &local
                     arrayof wgpu.BindGroupEntry
-                        gfx.descriptors.bindings.Buffer 0 vertices-buffer 0 attribute-array-size
+                        descriptors.bindings.Buffer 0 vertices-buffer 0 attribute-array-size
             entries_length = 1
 
 # GAME LOGIC / RENDERING
