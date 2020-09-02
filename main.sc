@@ -38,7 +38,15 @@ inline make-pipeline (layout vshader fshader output-format blend-mode)
     let alpha-blend =
         switch blend-mode
         case BlendMode.Alpha
+            wgpu.BlendDescriptor
+                src_factor = wgpu.BlendFactor.SrcAlpha
+                dst_factor = wgpu.BlendFactor.OneMinusSrcAlpha
+                operation = wgpu.BlendOperation.Add
         case BlendMode.Replace
+            wgpu.BlendDescriptor
+                src_factor = wgpu.BlendFactor.One
+                dst_factor = wgpu.BlendFactor.Zero
+                operation = wgpu.BlendOperation.Add
         default
             error "unknown blend mode"
     wgpu.device_create_render_pipeline device
@@ -58,16 +66,8 @@ inline make-pipeline (layout vshader fshader output-format blend-mode)
             color_states =
                 &local wgpu.ColorStateDescriptor
                     format = output-format
-                    alpha_blend =
-                        typeinit
-                            src_factor = wgpu.BlendFactor.One
-                            dst_factor = wgpu.BlendFactor.Zero
-                            operation = wgpu.BlendOperation.Add
-                    color_blend =
-                        typeinit
-                            src_factor = wgpu.BlendFactor.One
-                            dst_factor = wgpu.BlendFactor.Zero
-                            operation = wgpu.BlendOperation.Add
+                    alpha_blend = alpha-blend
+                    color_blend = alpha-blend
                     write_mask = wgpu.ColorWrite_ALL
             color_states_length = 1
             vertex_state =
@@ -329,11 +329,16 @@ define-scope shaders
                     (angle + (pi / 2))
 
         let t = (tile@ level-data level-width level-height tile-samplep)
-        if ((distance vtexcoord (vec2 0.5)) < 0.025)
+        let tocenter = (distance vtexcoord (vec2 0.5))
+        if (tocenter > 0.495)
+            discard;
+        if (tocenter < 0.025)
             fcolor = (vec4 1 0 0 1)
         else
-            fcolor = (mix ground-color (vec4 1) t)
-      
+            fcolor =
+                mix (mix ground-color (vec4 1) t) (vec4 0.14 0.14 0.14 1.0)
+                    smoothstep 0.475 0.480 tocenter
+     
 global vshader               = (make-shader shaders.vertex 'vertex)
 global fshader-fb            = (make-shader shaders.fb-fragment 'fragment)
 global fshader-rays          = (make-shader shaders.rays-fragment 'fragment)
@@ -510,11 +515,10 @@ global tex-sampler =
             address_mode_u = wgpu.AddressMode.ClampToEdge
             address_mode_v = wgpu.AddressMode.ClampToEdge
             address_mode_w = wgpu.AddressMode.ClampToEdge
-            mag_filter = wgpu.FilterMode.Nearest
-            min_filter = wgpu.FilterMode.Nearest
+            mag_filter = wgpu.FilterMode.Linear
+            min_filter = wgpu.FilterMode.Linear
             mipmap_filter = wgpu.FilterMode.Nearest
             compare = wgpu.CompareFunction.Always
-
 
 global distance-tex-bgroup =
     wgpu.device_create_bind_group device
@@ -616,11 +620,10 @@ for i in (range 4)
     let pos =
         (qvertices @ i)
     pos := pos + (vec2 1 -1)
-    pos := pos * (vec2 (fb-height / fb-width) 1) * 0.2 - (vec2 0.98 -0.98)
+    pos := pos * (vec2 (fb-height / fb-width) 1) * 0.2 - (vec2 0.95 -0.96)
     'append vertices
         VertexAttributes
             position = pos
-                # ((((qvertices @ i) - (vec2 1 -1)) / 5) - (vec2 0.5 -0.5)) * (vec2 (fb-width / fb-height) 1)
             texcoord = (qtexcoords @ i)
             color = (vec4 1)
 
@@ -755,7 +758,7 @@ while (not (HID.window.received-quit-event?))
                         attachment = minimap-texview
                         load_op = wgpu.LoadOp.Clear
                         store_op = wgpu.StoreOp.Store
-                        clear_color = (wgpu.Color (unpack ground-color))
+                        clear_color = (wgpu.Color (unpack (vec4 0)))
                 color_attachments_length = 1
 
     wgpu.render_pass_set_pipeline minimap-render-pass minimap-pipeline
